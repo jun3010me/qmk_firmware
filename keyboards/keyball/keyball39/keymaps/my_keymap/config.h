@@ -53,3 +53,20 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 // Cap VIA macro storage at 1019 so dynamic_keymap_macro_reset() never zeroes those bytes.
 #define DYNAMIC_KEYMAP_EEPROM_MAX_ADDR 1019
 
+// Disable split watchdog to prevent the secondary MCU from resetting during USB suspend.
+//
+// Root cause of the "CPI feels low after idle" bug:
+//   1. Host suspends USB (display sleep) → master stops sending split sync packets.
+//   2. Holykeebs sets SPLIT_WATCHDOG_TIMEOUT to 3000ms, so secondary resets after 3s.
+//   3. Secondary reboots and reads CPI from its own EEPROM (flash).
+//      On RP2040, each MCU has independent flash; VIA only writes to master's flash,
+//      so secondary always restores to KEYBALL_CPI_DEFAULT (1200) after reset.
+//   4. Master's split CPI sync only sends on change (last_cpi != shared_cpi).
+//      Since the master's CPI hasn't changed, it never resyncs to the secondary.
+//   5. User sees abnormally low CPI until USB is reconnected (which resets last_cpi).
+//
+// Fix: prevent secondary reset by disabling the watchdog.
+// RP2040 is stable enough that a secondary hang requiring watchdog recovery is
+// effectively never seen in practice.
+#undef SPLIT_WATCHDOG_ENABLE
+
