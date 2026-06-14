@@ -71,3 +71,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #undef SPLIT_WATCHDOG_ENABLE
 
 #define COMBO_TERM 100
+// Always match combos against layer 0 keycodes.
+// Without this, combos don't fire on layer 1 (auto mouse) because D/F/J/K
+// map to different keys on that layer.
+#define COMBO_ONLY_FROM_LAYER 0

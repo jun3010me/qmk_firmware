@@ -509,12 +509,16 @@ void oledkit_render_logo_user(void) {
 }
 #endif
 
-// キーの組み合わせを定義
 const uint16_t PROGMEM df_combo[] = {KC_D, KC_F, COMBO_END};
 const uint16_t PROGMEM jk_combo[] = {KC_J, KC_K, COMBO_END};
 
-// コンボテーブル
 combo_t key_combos[] = {
-    COMBO(df_combo, KC_LNG2),  // DF → 英数
-    COMBO(jk_combo, KC_LNG1),  // JK → かな
+    COMBO(df_combo, KC_LNG2),
+    COMBO(jk_combo, KC_LNG1),
 };
+
+void process_combo_event(uint16_t combo_index, bool pressed) {
+    if (pressed) {
+        dprintf("combo fired: %u\n", combo_index);
+    }
+}
