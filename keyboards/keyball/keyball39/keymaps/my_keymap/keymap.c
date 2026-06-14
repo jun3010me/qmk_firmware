@@ -20,6 +20,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "quantum.h"
 #include "eeprom.h"
 #include "transactions.h"
+#include <lib/lib8tion/lib8tion.h>
 
 // Layer + mods synced to slave via MY_LAYER_SYNC RPC (2 bytes: [layer, mods]).
 static uint8_t slave_layer = 0;
@@ -133,10 +134,12 @@ static uint16_t tt_load(void) {
 //   ESC_ML      - exit AML only
 //   ESC_ML_LNG2 - exit AML then tap LNG2 (英数, switch to English input)
 //   ESC_ML_LNG1 - exit AML then tap LNG1 (かな, switch to Japanese input)
+//   MY_ANI      - cycle custom LED animation (OFF → PLASMA → AURORA → METEOR → OFF)
 enum my_keycodes {
     ESC_ML = KEYBALL_SAFE_RANGE,
     ESC_ML_LNG2,
     ESC_ML_LNG1,
+    MY_ANI,
 };
 
 // Deferred LNG key: sent on the next matrix scan after AML exit so that
@@ -150,7 +153,86 @@ void matrix_scan_user(void) {
     }
 }
 
+// ── Custom per-LED animations ──────────────────────────────────────────────────
+// MY_ANI cycles: OFF → PLASMA → AURORA → METEOR → OFF.
+// Uses rgblight_driver.set_color() × 24 (buffer only, no flush) + rgblight_set()
+// × 1 per frame → ~1.5ms DMA busy time, safe for keyboard scanning.
+// Both sides render independently using their local 24-LED indices.
+
+typedef enum {
+    MY_ANIM_OFF = 0,
+    MY_ANIM_PLASMA,   // multi-wave HSV interference: fast, vibrant, full-spectrum
+    MY_ANIM_AURORA,   // slow cool-color bands: blue/teal/green drifting gently
+    MY_ANIM_METEOR,   // three coloured shooting stars circling the strip
+    MY_ANIM_COUNT,
+} my_anim_mode_t;
+
+static my_anim_mode_t my_anim       = MY_ANIM_OFF;
+static uint16_t       my_anim_timer = 0;
+static uint16_t       my_tick       = 0;
+
+#define MY_ANIM_LEDS 24
+#define MY_ANIM_MS   20
+
+static void my_draw_anim(void) {
+    uint8_t t = (uint8_t)my_tick;
+
+    // Meteor comet parameters (PROGMEM to avoid stack)
+    static const uint8_t PROGMEM met_spd[3] = {5, 7, 11};
+    static const uint8_t PROGMEM met_hue[3] = {0, 85, 170};
+
+    for (uint8_t i = 0; i < MY_ANIM_LEDS; i++) {
+        uint8_t h = 0, s = 255, v = 0;
+
+        switch (my_anim) {
+            case MY_ANIM_PLASMA: {
+                // Three overlapping sine waves → complex colour interference
+                uint8_t w1 = sin8((uint8_t)(i * 8  + t));
+                uint8_t w2 = sin8((uint8_t)(i * 13 + t + (t >> 1)));
+                uint8_t w3 = sin8((uint8_t)(i * 3  - (t >> 1)));
+                h = w1 / 3 + w2 / 3 + w3 / 3;
+                v = 130 + sin8((uint8_t)((h >> 1) + t)) / 5;  // 130-181
+                break;
+            }
+            case MY_ANIM_AURORA: {
+                // Hue drifts in the blue-teal-green-purple band (130-193)
+                h = 130 + sin8((uint8_t)(i * 6 + t / 3)) / 4;
+                s = 220;
+                v = 80 + sin8((uint8_t)(i * 9 + (t >> 1))) / 3;  // 80-165
+                break;
+            }
+            case MY_ANIM_METEOR: {
+                // Three coloured comets (R/G/B) with exponential tails
+                for (uint8_t c = 0; c < 3; c++) {
+                    uint8_t spd  = pgm_read_byte(&met_spd[c]);
+                    uint8_t head = (uint8_t)(((uint16_t)t * spd >> 2) % MY_ANIM_LEDS);
+                    uint8_t dist = (uint8_t)((head - i + MY_ANIM_LEDS) % MY_ANIM_LEDS);
+                    if (dist < 6) {
+                        uint8_t br = (uint8_t)(200 >> dist);  // 200→100→50→25→12→6
+                        if (br > v) { h = pgm_read_byte(&met_hue[c]); v = br; }
+                    }
+                }
+                break;
+            }
+            default: break;
+        }
+
+        hsv_t hsv = {h, s, v};
+        rgb_t rgb = hsv_to_rgb(hsv);
+        // set_color() only writes to buffer; rgblight_set() below does one DMA flush.
+        rgblight_driver.set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+    rgblight_set();
+}
+
 void housekeeping_task_user(void) {
+    // Animation runs on both sides (each drives its own 24 LEDs)
+    if (my_anim != MY_ANIM_OFF && timer_elapsed(my_anim_timer) >= MY_ANIM_MS) {
+        my_anim_timer = timer_read();
+        my_tick++;
+        my_draw_anim();
+    }
+
 #if defined(SPLIT_KEYBOARD)
     if (is_keyboard_master()) {
         static uint16_t last_saved = TAPPING_TERM;
@@ -200,6 +282,18 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
                 pending_lang_key = KC_LNG1;
             }
             return false;
+        case MY_ANI:
+            if (record->event.pressed) {
+                my_anim = (my_anim_mode_t)((my_anim + 1) % MY_ANIM_COUNT);
+                if (my_anim == MY_ANIM_OFF) {
+                    // Re-apply the current layer's colour
+                    layer_state_set_user(layer_state);
+                } else {
+                    // Freeze RGBLIGHT so its timer doesn't overwrite our per-LED work
+                    rgblight_mode_noeeprom(RGBLIGHT_MODE_STATIC_LIGHT);
+                }
+            }
+            return false;
     }
     return true;
 }
@@ -229,7 +323,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
   ),
 
   [3] = LAYOUT_universal(
-    RGB_TOG  , AML_TO   , AML_I50  , AML_D50  , KC_NO    ,                            DT_DOWN  , DT_UP    , SSNP_HOR , SSNP_VRT , SSNP_FRE ,
+    RGB_TOG  , AML_TO   , AML_I50  , AML_D50  , MY_ANI   ,                            DT_DOWN  , DT_UP    , SSNP_HOR , SSNP_VRT , SSNP_FRE ,
     RGB_MOD  , RGB_HUI  , RGB_SAI  , RGB_VAI  , KBC_SAVE ,                            KC_NO    , KC_NO    , KC_NO    , KC_NO    , KC_NO    ,
     RGB_RMOD , RGB_HUD  , RGB_SAD  , RGB_VAD  , KC_NO    ,                            CPI_D1K  , CPI_D100 , CPI_I100 , CPI_I1K  , KBC_SAVE ,
     QK_BOOT  , KBC_RST  , KC_NO    , KC_NO    , KC_NO    , KC_NO    ,      KC_LNG2  , KC_LNG1  , KC_NO    , KC_NO    , KBC_RST  , QK_BOOT
@@ -318,7 +412,9 @@ layer_state_t layer_state_set_user(layer_state_t state) {
         case 6: hue =   0; break; // 蛍光レッド（未使用）
         default: hue =  85; break;
     }
-    rgblight_sethsv_noeeprom(hue, 255, current_val);
+    if (my_anim == MY_ANIM_OFF) {
+        rgblight_sethsv_noeeprom(hue, 255, current_val);
+    }
 
     return state;
 }
