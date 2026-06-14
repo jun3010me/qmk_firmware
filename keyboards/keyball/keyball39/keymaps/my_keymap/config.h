@@ -70,3 +70,4 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 // effectively never seen in practice.
 #undef SPLIT_WATCHDOG_ENABLE
 
+#define COMBO_TERM 100
