@@ -285,6 +285,7 @@ void keyball_on_apply_motion_to_mouse_scroll(report_mouse_t *report, report_mous
 }
 
 void keyboard_post_init_user(void) {
+    dprintf("is_master: %d\n", is_keyboard_master());
     if (!is_keyboard_master()) {
         transaction_register_rpc(MY_LAYER_SYNC, layer_sync_handler);
         return;

@@ -47,7 +47,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #undef SPLIT_TRANSACTION_IDS_USER
 #define SPLIT_TRANSACTION_IDS_USER HK_SYNC_STATE, MY_LAYER_SYNC
 #define KEYBALL_SCROLL_DIV_DEFAULT 4
-#define KEYBALL_CPI_DEFAULT 1200
+#define KEYBALL_CPI_DEFAULT 1100
 
 // Tapping term is stored at bytes 1020-1023 (value + 0xBEEF magic).
 // Cap VIA macro storage at 1019 so dynamic_keymap_macro_reset() never zeroes those bytes.
